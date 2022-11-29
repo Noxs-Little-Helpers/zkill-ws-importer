@@ -1,0 +1,15 @@
+{
+  "websocket": {
+    "url": "wss://zkillboard.com/websocket/",
+    "sub_message": "{\"action\":\"sub\",\"channel\":\"killstream\"}",
+    "client_id": "nlh/kill-importer"
+  },
+  "database": {
+    "conn_string": "mongodb://localhost:27017",
+    "database_name": "kill",
+    "collection_name": "kill-importer"
+  },
+  "logging": {
+    "logging_dir": "./logs/log.txt"
+  }
+}

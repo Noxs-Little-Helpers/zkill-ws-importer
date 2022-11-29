@@ -1,0 +1,63 @@
+//! A simple example of hooking up stdin/stdout to a WebSocket stream.
+//!
+//! This example will connect to a server specified in the argument list and
+//! then forward all data read on stdin to the server, printing out all data
+//! received on stdout.
+//!
+//! Note that this is not currently optimized for performance, especially around
+//! buffer management. Rather it's intended to show an example of working with a
+//! client.
+//!
+//! You can use this example together with the `server` example.
+/*
+    Required dependencies
+    tokio-tungstenite = { version = "0.17.2", features = ["native-tls"] }
+    tokio = { version = "1.22.0", features = ["full"] }
+    futures-util = "0.3.25"
+    futures-channel = "0.3.25"
+    url = "2.3.1"
+*/
+extern crate core;
+
+use std::env;
+
+use futures_util::{future, pin_mut, SinkExt, StreamExt};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio_tungstenite::{connect_async, tungstenite::protocol::Message};
+use tokio_tungstenite::tungstenite::Message::{Binary, Ping, Pong, Text};
+
+#[tokio::main]
+async fn main() {
+    // let connect_addr = "xyz";
+    let connect_addr = "wss://zkillboard.com/websocket/";
+    let sub_message = "{\"action\":\"sub\",\"channel\":\"public\"}";
+
+    let url = match url::Url::parse(&connect_addr) {
+        Ok(result) => result,
+        Err(error) => panic!("Invalid url passed [{0}] Error[{1}]", connect_addr, error)
+    };
+
+    let (ws_stream, _) = connect_async(url).await.expect("Failed to connect");
+    println!("WebSocket handshake has been successfully completed");
+
+    let (mut write, read) = ws_stream.split();
+
+    write.send(sub_message.into()).await.unwrap();
+
+    read.for_each(|message| async {
+        // let ws_message_text = message.unwrap().into_text().unwrap();
+        let ws_message_text = match message {
+            Ok(message) => match message {
+                Text(text) => text,
+                Binary(binary) | Ping(binary) | Pong(binary)=> {
+                    // panic!("{}", String::from_utf8(binary).unwrap())
+                    String::from_utf8(binary).unwrap()
+                },
+                unhandled_type => format!("Got unfamiliar type {0}",unhandled_type).to_owned()
+            }
+            Err(err) => panic!("Got error reading from ws {0}", err)
+        };
+        tokio::io::stdout().write_all(&(ws_message_text+"\n").as_bytes()).await.unwrap();
+    }).await;
+}
+

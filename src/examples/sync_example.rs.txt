@@ -1,0 +1,29 @@
+/*
+    Required dependencies
+    env_logger = "0.9.3"
+    tungstenite = { version = "0.17.3", features = ["native-tls"] }
+    url = "2.3.1"
+ */
+use tungstenite::{connect, Message};
+use url::Url;
+
+fn main() {
+    env_logger::init();
+
+    let (mut socket, response) =
+        connect(Url::parse("wss://zkillboard.com/websocket/").unwrap()).expect("Can't connect");
+
+    println!("Connected to the server");
+    println!("Response HTTP code: {}", response.status());
+    println!("Response contains the following headers:");
+    for (ref header, _value) in response.headers() {
+        println!("* {}", header);
+    }
+
+    socket.write_message(Message::Text("{\"action\":\"sub\",\"channel\":\"public\"}".into())).unwrap();
+    loop {
+        let msg = socket.read_message().expect("Error reading message");
+        println!("Received: {}", msg);
+    }
+    // socket.close(None);
+}
