@@ -1,21 +1,13 @@
 FROM rust:1.65.0 as builder
-
 WORKDIR /zkill-ws-importer/source
-
 COPY /Cargo.toml .
 COPY /Cargo.lock .
 COPY /src ./src
-#RUN cargo build --release
+RUN cargo install --locked --path .
 
-#WORKDIR /zkill-ws-importer
-#COPY /working_dir/config.json .
+FROM rust:1.65.0
+WORKDIR /zkill-ws-importer
+COPY --from=builder /zkill-ws-importer/source/target/release/zkill-ws-importer /zkill-ws-importer
+COPY /prod/prod_config.json config.json
 
-
-
-RUN cargo install --path .
-FROM debian:buster-slim
-RUN apt-get update && apt-get install -y extra-runtime-dependencies && rm -rf /var/lib/apt/lists/*
-COPY --from=builder /usr/local/cargo/bin/zkill-ws-importer /usr/local/bin/zkill-ws-importer
-COPY /working_dir/config.json config.json
-#WORKDIR /zkill-ws-importer
-ENTRYPOINT  ["zkill-ws-importer", "config.json"]
+ENTRYPOINT  ["./zkill-ws-importer", "config.json"]

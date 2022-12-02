@@ -80,25 +80,25 @@ async fn main() {
 
 // async fn read_from_ws_to_cache(cache_list: Arc<Mutex<Vec<&String>>>, app_config: Arc<AppConfig>) {
 async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: AppConfig) {
-    info!("Starting websocket connection");
+    info!("Web Socket: Starting connection");
     loop {
         let ws_stream = match start_websocket(&app_config.websocket.url).await {
             Ok((stream, _)) => {
-                info!("Connected to websocket");
+                info!("Web Socket: Connected");
                 stream
             }
             Err(error) => {
-                error!("Could not connect to websocket. Reconnecting...");
+                error!("Web Socket: Could not connect. Reattempting...");
                 continue;
             }
         };
         let (mut write, read) = ws_stream.split();
 
-        info!("Attempting to send subscribe message");
+        info!("Web Socket: Attempting to send subscribe message");
         match write.send(app_config.websocket.sub_message.clone().into()).await {
-            Ok(_) => { info!("Subscription message sent successfully") }
+            Ok(_) => { info!("Web Socket: Subscription message sent successfully") }
             Err(err) => {
-                error!("Unable to subscribe to websocket. Reattempting...");
+                error!("Web Socket: Unable to subscribe. Reattempting...");
                 continue;
             }
         }
@@ -161,7 +161,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
         }
     };
     {
-        info!("Attempting to connect to database");
+        info!("Database: Attempting to connect");
         let mut test_ping_successful = false;
         loop {
             match ping_db(&client, &app_config.database.database_name).await {
