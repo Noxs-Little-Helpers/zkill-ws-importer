@@ -1,6 +1,7 @@
 mod database;
 mod models;
 
+use crate::models::config::LoggingConfig;
 extern crate core;
 
 use futures_util::{future, pin_mut, SinkExt, StreamExt, TryFutureExt};
@@ -22,22 +23,31 @@ use std::sync::Arc;
 use log::{error, info, warn, LevelFilter, debug};
 use log4rs::{
     append::{
-        console::ConsoleAppender,
+        console::{
+            ConsoleAppender,
+            Target,
+        },
         file::FileAppender,
+        rolling_file::{
+            policy::{
+                compound::CompoundPolicy,
+                compound::roll::fixed_window::FixedWindowRoller,
+                compound::trigger::size::SizeTrigger,
+            },
+            RollingFileAppender,
+        },
     },
     encode::{pattern::PatternEncoder, json::JsonEncoder},
     config::{Appender, Config, Logger, Root},
+    filter::threshold::ThresholdFilter,
 };
-use log4rs::append::console::Target;
-use log4rs::filter::threshold::ThresholdFilter;
-use mongodb::bson::{Bson, doc};
+use mongodb::{
+    bson::{Bson, doc},
+    options::ClientOptions,
+    results::InsertOneResult,
+};
 use std::sync::Mutex;
-use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
-use log4rs::append::rolling_file::policy::compound::roll::fixed_window::FixedWindowRoller;
-use log4rs::append::rolling_file::policy::compound::trigger::size::SizeTrigger;
-use log4rs::append::rolling_file::RollingFileAppender;
-use mongodb::options::ClientOptions;
-use mongodb::results::InsertOneResult;
+
 
 use models::{
     zkillboard,
@@ -49,7 +59,6 @@ use tungstenite::{
     handshake::client::Response,
     protocol::WebSocketConfig,
 };
-use crate::models::config::LoggingConfig;
 
 #[tokio::main]
 async fn main() {
