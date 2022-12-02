@@ -31,5 +31,7 @@ pub struct DatabaseConfig {
 #[derive(Serialize, Deserialize)]
 #[derive(Clone)]
 pub struct LoggingConfig {
-    pub logging_dir: String,
+    pub dir: String,
+    pub active_file: String,
+    pub archive_pattern: String,
 }

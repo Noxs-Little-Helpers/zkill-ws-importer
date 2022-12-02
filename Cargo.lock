@@ -1991,8 +1991,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "zkill-importer"
-version = "1.0.0"
+name = "zkill-ws-importer"
+version = "1.0.1"
 dependencies = [
  "futures-channel",
  "futures-util",

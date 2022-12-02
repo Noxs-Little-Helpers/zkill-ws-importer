@@ -10,6 +10,8 @@
     "collection_name": "kill-importer"
   },
   "logging": {
-    "logging_dir": "./logs/log.txt"
+    "dir": "./logs",
+    "active_file": "zkill-ws-importer.log",
+    "archive_pattern": "zkill-ws-importer_{}.log"
   }
 }

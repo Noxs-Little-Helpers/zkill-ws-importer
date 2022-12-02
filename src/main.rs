@@ -19,7 +19,7 @@ use serde_json::Value;
 use std::env;
 use std::fs;
 use std::sync::Arc;
-use log::{error, info, warn, LevelFilter, debug, trace};
+use log::{error, info, warn, LevelFilter, debug};
 use log4rs::{
     append::{
         console::ConsoleAppender,
@@ -32,6 +32,10 @@ use log4rs::append::console::Target;
 use log4rs::filter::threshold::ThresholdFilter;
 use mongodb::bson::{Bson, doc};
 use std::sync::Mutex;
+use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
+use log4rs::append::rolling_file::policy::compound::roll::fixed_window::FixedWindowRoller;
+use log4rs::append::rolling_file::policy::compound::trigger::size::SizeTrigger;
+use log4rs::append::rolling_file::RollingFileAppender;
 use mongodb::options::ClientOptions;
 use mongodb::results::InsertOneResult;
 
@@ -45,28 +49,14 @@ use tungstenite::{
     handshake::client::Response,
     protocol::WebSocketConfig,
 };
-/*
-logging lib https://docs.rs/log4rs/latest/log4rs/
+use crate::models::config::LoggingConfig;
 
-https://docs.rs/futures/latest/futures/stream/trait.TryStreamExt.html#method.try_for_each
-*/
 #[tokio::main]
 async fn main() {
-    /*
-        Tasks
-            Connect to ws
-                ensure that if ws disconnects we keep reattempting and display some sort of error message
-            When we get info from socket pull the extra data and send to database
-
-    */
-
-
     let app_config: config::AppConfig = load_config();
-    config_logging(&app_config.logging.logging_dir).await;
-    info!("Application started");
-
+    config_logging(&app_config.logging);
+    info!("zkill-ws-importer started");
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
-
     // let app_config_arc = Arc::new(app_config);
     let clone1 = app_config.clone();
     let clone2 = app_config.clone();
@@ -126,7 +116,7 @@ async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: AppCo
                     }
                 }
                 Err(error) => {
-                    warn!("Web Socket: Got a connection {0}", error);
+                    warn!("Web Socket: Error received on connection {0:?}", error);
                     return;
                 }
             };
@@ -140,9 +130,9 @@ async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: AppCo
                         panic!("Web Socket: Cannot send message on channel [{0}]", error);
                     }
                 };
-                trace!("Web Socket: Wrote message to channel [{0}]",print_str);
+                debug!("Web Socket: Wrote message to channel [{0}]",print_str);
             } else {
-                trace!("Web Socket: Received empty message. Will be ignored");
+                debug!("Web Socket: Received empty message. Will be ignored");
                 // tokio::io::stdout().write_all("Empty message\n".as_bytes()).await.unwrap();
             }
         }).await;
@@ -197,7 +187,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
             match write_to_db(&client, bson_doc, &app_config.database.database_name, &app_config.database.collection_name).await {
                 Ok(inserted_id) => {
                     able_to_write_to_database = true;
-                    trace!("Document added to database id [{0}]", inserted_id.inserted_id);
+                    debug!("Document added to database id [{0}]", inserted_id.inserted_id);
                 }
                 Err(error) => {
                     error!("Got error attempting to write to database message[{0}] [{1:?}]", ws_message, error);
@@ -231,34 +221,45 @@ fn load_config() -> config::AppConfig {
     return model;
 }
 
-async fn config_logging(log_file: &String) {
-    let level = log::LevelFilter::Info;
-
-    // Build a stderr logger.
-    let stderr = ConsoleAppender::builder().target(Target::Stderr)
-        // .encoder(Box::new(JsonEncoder::new()))
+fn config_logging(logging_config: &LoggingConfig) {
+    let mut active_log = String::new();
+    {
+        active_log.push_str(&logging_config.dir);
+        active_log.push_str("/");
+        active_log.push_str(&logging_config.active_file);
+    }
+    let mut archive_patter = String::new();
+    {
+        archive_patter.push_str(&logging_config.dir);
+        archive_patter.push_str("/");
+        archive_patter.push_str(&logging_config.archive_pattern);
+    }
+    let log_to_stdout = ConsoleAppender::builder().target(Target::Stdout)
         .build();
-
     // Build a file logger.
-    let logfile = FileAppender::builder()
+    let log_to_file = RollingFileAppender::builder()
         .encoder(Box::new(JsonEncoder::new()))
-        .build(log_file)
+        .build(&active_log,
+               Box::new(CompoundPolicy::new(
+                   Box::new(SizeTrigger::new(10 * 1024 * 1024)),
+                   Box::new(FixedWindowRoller::builder().build(&archive_patter, 10).unwrap()),
+               )))
         .unwrap();
 
-    // Log Trace level output to file where trace is the default level
+    // Log Debug level output to file where debug is the default level
     // and the programmatically specified level to stderr.
     let config = Config::builder()
-        .appender(Appender::builder().build("logfile", Box::new(logfile)))
+        .appender(Appender::builder().build("log_to_file", Box::new(log_to_file)))
         .appender(
             Appender::builder()
-                .filter(Box::new(ThresholdFilter::new(level)))
-                .build("stderr", Box::new(stderr)),
+                .filter(Box::new(ThresholdFilter::new(log::LevelFilter::Info)))
+                .build("log_to_stdout", Box::new(log_to_stdout)),
         )
         .build(
             Root::builder()
-                .appender("logfile")
-                .appender("stderr")
-                .build(LevelFilter::Trace),
+                .appender("log_to_file")
+                .appender("log_to_stdout")
+                .build(LevelFilter::Debug),
         )
         .unwrap();
 
