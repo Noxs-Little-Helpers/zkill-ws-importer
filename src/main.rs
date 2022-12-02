@@ -130,8 +130,10 @@ async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: AppCo
                         panic!("Web Socket: Cannot send message on channel [{0}]", error);
                     }
                 };
+                info!("Web Socket: Wrote message to channel");
                 debug!("Web Socket: Wrote message to channel [{0}]",print_str);
             } else {
+                info!("Web Socket: Received empty message");
                 debug!("Web Socket: Received empty message. Will be ignored");
                 // tokio::io::stdout().write_all("Empty message\n".as_bytes()).await.unwrap();
             }
@@ -145,8 +147,8 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
             client
         }
         Err(error) => {
-            error!("Unable to create database client");
-            panic!("Unable to create database client. Dont know how to proceed so panicking");
+            error!("Database: Unable to create database client");
+            panic!("Database: Unable to create database client. Dont know how to proceed so panicking");
         }
     };
     {
@@ -156,11 +158,11 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
             match ping_db(&client, &app_config.database.database_name).await {
                 Ok(document) => { test_ping_successful = true }
                 Err(error) => {
-                    error!("Unable to ping database. Reattempting... [{0:?}]", error);
+                    error!("Database: Unable to ping. Reattempting... [{0:?}]", error);
                 }
             }
             if (test_ping_successful) {
-                info!("Database connection established");
+                info!("Database: Connection established");
                 break;
             }
         }
@@ -173,30 +175,31 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
             let value: Value = match serde_json::from_str(&ws_message) {
                 Ok(value) => { value }
                 Err(error) => {
-                    warn!("Message could not be parsed by serde_json [{0}] [{1:?}]", ws_message, error);
+                    warn!("Database: Message could not be parsed by serde_json [{0}] [{1:?}]", ws_message, error);
                     break;//Skip the message it might not be valid json
                 }
             };
             let bson_doc = match bson::to_bson(&value) {
                 Ok(value) => { value }
                 Err(error) => {
-                    warn!("Json from serde_json could not be parsed by bson [{0}] [{1:?}]", ws_message, error);
+                    warn!("Database: Json from serde_json could not be parsed by bson [{0}] [{1:?}]", ws_message, error);
                     break;//Skip the message it might not be valid json
                 }
             };
             match write_to_db(&client, bson_doc, &app_config.database.database_name, &app_config.database.collection_name).await {
                 Ok(inserted_id) => {
                     able_to_write_to_database = true;
-                    debug!("Document added to database id [{0}]", inserted_id.inserted_id);
+                    info!("Database: Document inserted");
+                    debug!("Database: Document inserted ID: [{0}]", inserted_id.inserted_id);
                 }
                 Err(error) => {
-                    error!("Got error attempting to write to database message[{0}] [{1:?}]", ws_message, error);
+                    error!("Database: Got error attempting to write to database message[{0}] [{1:?}]", ws_message, error);
                     had_disconnect = true;
                     continue;//Dont skip the message. We should wait for db to reconnect
                 }
             }
             if (able_to_write_to_database) {
-                if had_disconnect { info!("Reconnected to database"); }
+                if had_disconnect { info!("Database: Reconnected"); }
                 break;
             };
         }
