@@ -1,26 +1,22 @@
-mod database;
 mod models;
 
 use crate::models::config::LoggingConfig;
 
 extern crate core;
 
-use futures_util::{future, pin_mut, SinkExt, StreamExt, TryFutureExt};
+use futures_util::{SinkExt, StreamExt};
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
     net::TcpStream,
     sync::mpsc::{UnboundedReceiver, UnboundedSender},
 };
 use tokio_tungstenite::{
-    connect_async, MaybeTlsStream, tungstenite::protocol::Message, WebSocketStream,
+    connect_async, MaybeTlsStream, WebSocketStream,
     tungstenite::Message::{Binary, Ping, Pong, Text},
 };
-use serde::{Deserialize, Serialize};
 use mongodb::{bson, bson::Document, Client, Collection, Database};
 use serde_json::Value;
 use std::env;
 use std::fs;
-use std::sync::Arc;
 use log::{error, info, warn, LevelFilter, debug};
 use log4rs::{
     append::{
@@ -28,7 +24,6 @@ use log4rs::{
             ConsoleAppender,
             Target,
         },
-        file::FileAppender,
         rolling_file::{
             policy::{
                 compound::CompoundPolicy,
@@ -38,8 +33,8 @@ use log4rs::{
             RollingFileAppender,
         },
     },
-    encode::{pattern::PatternEncoder, json::JsonEncoder},
-    config::{Appender, Config, Logger, Root},
+    encode::{json::JsonEncoder},
+    config::{Appender, Config, Root},
     filter::threshold::ThresholdFilter,
 };
 use mongodb::{
@@ -47,18 +42,8 @@ use mongodb::{
     options::ClientOptions,
     results::InsertOneResult,
 };
-use std::sync::Mutex;
-
-
 use models::{
-    zkillboard,
     config,
-    config::AppConfig,
-};
-use tungstenite::{
-    error::{UrlError},
-    handshake::client::Response,
-    protocol::WebSocketConfig,
 };
 
 #[tokio::main]
@@ -66,7 +51,7 @@ async fn main() {
     let app_config: config::AppConfig = load_config();
     config_logging(&app_config.logging);
     info!("zkill-ws-importer started");
-    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     // let app_config_arc = Arc::new(app_config);
     let clone1 = app_config.clone();
     let clone2 = app_config.clone();
@@ -80,7 +65,7 @@ async fn main() {
 }
 
 // async fn read_from_ws_to_cache(cache_list: Arc<Mutex<Vec<&String>>>, app_config: Arc<AppConfig>) {
-async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: AppConfig) {
+async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: config::AppConfig) {
     info!("Web Socket: Starting connection");
     loop {
         let ws_stream = match start_websocket(&app_config.websocket.url).await {
@@ -89,7 +74,7 @@ async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: AppCo
                 stream
             }
             Err(error) => {
-                error!("Web Socket: Could not connect. Reattempting...");
+                error!("Web Socket: Could not connect. Reattempting... [{:?}]", error);
                 continue;
             }
         };
@@ -99,7 +84,7 @@ async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: AppCo
         match write.send(app_config.websocket.sub_message.clone().into()).await {
             Ok(_) => { info!("Web Socket: Subscription message sent successfully") }
             Err(err) => {
-                error!("Web Socket: Unable to subscribe. Reattempting...");
+                error!("Web Socket: Unable to subscribe. Reattempting... [{:?}]", err);
                 continue;
             }
         }
@@ -151,14 +136,14 @@ async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: AppCo
     }
 }
 
-async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_config: AppConfig) {
+async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_config: config::AppConfig) {
     let client: Client = match connect_to_db(&app_config.database.conn_string).await {
         Ok(client) => {
             client
         }
         Err(error) => {
-            error!("Database: Unable to create database client");
-            panic!("Database: Unable to create database client. Dont know how to proceed so panicking");
+            error!("Database: Unable to create database client [{0:?}]",error);
+            panic!("Database: Unable to create database client. Dont know how to proceed so panicking [{0:?}]", error);
         }
     };
     let database = client.database(&app_config.database.database_name);
@@ -168,19 +153,19 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
         let mut test_ping_successful = false;
         loop {
             match ping_db(&database).await {
-                Ok(document) => { test_ping_successful = true }
+                Ok(_) => { test_ping_successful = true }
                 Err(error) => {
                     error!("Database: Unable to ping. Reattempting... [{0:?}]", error);
                 }
             }
-            if (test_ping_successful) {
+            if test_ping_successful {
                 info!("Database: Connection established");
                 break;
             }
         }
     }
     while let Some(ws_message) = receiver_channel.recv().await {
-        let mut able_to_write_to_database = false;
+        let mut able_to_write_to_database;
         let mut had_disconnect = false;
         loop {
             // let model: zkillboard::ZKillmail = serde_json::from_str(ws_message).unwrap();
@@ -210,7 +195,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                     continue;//Dont skip the message. We should wait for db to reconnect
                 }
             }
-            if (able_to_write_to_database) {
+            if able_to_write_to_database {
                 if had_disconnect { info!("Database: Reconnected"); }
                 break;
             };
@@ -223,7 +208,7 @@ async fn write_to_db(write_value: Bson, collection: &Collection<Bson>) -> Result
 }
 
 async fn connect_to_db(connect_addr: &String) -> mongodb::error::Result<Client> {
-    let mut client_options = ClientOptions::parse(connect_addr).await?;
+    let client_options = ClientOptions::parse(connect_addr).await?;
     return Client::with_options(client_options);
 }
 

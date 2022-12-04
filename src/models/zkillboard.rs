@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use serde_json::Result;
 
 // pub mod zkillboard {
 #[derive(Serialize, Deserialize)]
@@ -45,13 +44,14 @@ struct KillmailItem {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct ZKillStats {
-    locationID: i32,
+    location_id: i32,
     hash: String,
-    fittedValue: f64,
-    droppedValue: f64,
-    destroyedValue: f64,
-    totalValue: f64,
+    fitted_value: f64,
+    dropped_value: f64,
+    destroyed_value: f64,
+    total_value: f64,
     points: i32,
     npc: bool,
     solo: bool,
