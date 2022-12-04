@@ -2,6 +2,7 @@ mod database;
 mod models;
 
 use crate::models::config::LoggingConfig;
+
 extern crate core;
 
 use futures_util::{future, pin_mut, SinkExt, StreamExt, TryFutureExt};
@@ -15,7 +16,7 @@ use tokio_tungstenite::{
     tungstenite::Message::{Binary, Ping, Pong, Text},
 };
 use serde::{Deserialize, Serialize};
-use mongodb::{bson, bson::Document, Client};
+use mongodb::{bson, bson::Document, Client, Collection, Database};
 use serde_json::Value;
 use std::env;
 use std::fs;
@@ -160,11 +161,13 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
             panic!("Database: Unable to create database client. Dont know how to proceed so panicking");
         }
     };
+    let database = client.database(&app_config.database.database_name);
+    let collection = database.collection(&app_config.database.collection_name);
     {
         info!("Database: Attempting to connect");
         let mut test_ping_successful = false;
         loop {
-            match ping_db(&client, &app_config.database.database_name).await {
+            match ping_db(&database).await {
                 Ok(document) => { test_ping_successful = true }
                 Err(error) => {
                     error!("Database: Unable to ping. Reattempting... [{0:?}]", error);
@@ -195,7 +198,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                     break;//Skip the message it might not be valid json
                 }
             };
-            match write_to_db(&client, bson_doc, &app_config.database.database_name, &app_config.database.collection_name).await {
+            match write_to_db(bson_doc, &collection).await {
                 Ok(inserted_id) => {
                     able_to_write_to_database = true;
                     info!("Database: Document inserted");
@@ -215,6 +218,21 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
     }
 }
 
+
+async fn write_to_db(write_value: Bson, collection: &Collection<T>) -> Result<InsertOneResult, mongodb::error::Error> {
+    return collection.insert_one(write_value, None).await;
+}
+
+async fn connect_to_db(connect_addr: &String) -> mongodb::error::Result<Client> {
+    let mut client_options = ClientOptions::parse(connect_addr).await?;
+    return Client::with_options(client_options);
+}
+
+async fn ping_db(database: &Database) -> Result<Document, mongodb::error::Error> {
+    return database
+        .run_command(doc! {"ping": 1}, None).await;
+}
+
 fn load_config() -> config::AppConfig {
     let args: Vec<String> = env::args().collect();
     let config_loc = match args.get(1) {
@@ -231,6 +249,17 @@ fn load_config() -> config::AppConfig {
     let model: config::AppConfig = serde_json::from_str(&contents).unwrap();
     // println!("{:?}", &model);
     return model;
+}
+
+async fn start_websocket(connect_addr: &String) -> Result<(WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::handshake::client::Response), tokio_tungstenite::tungstenite::Error> {
+    let url = match url::Url::parse(&connect_addr) {
+        Ok(result) => { result }
+        Err(error) => {
+            error!("Invalid websocket url [{0}] Error[{1}]", connect_addr, error);
+            panic!("Invalid websocket url [{0}] Error[{1}]", connect_addr, error);
+        }
+    };
+    return connect_async(url).await;
 }
 
 fn config_logging(logging_config: &LoggingConfig) {
@@ -276,32 +305,4 @@ fn config_logging(logging_config: &LoggingConfig) {
         .unwrap();
 
     log4rs::init_config(config).unwrap();
-}
-
-async fn start_websocket(connect_addr: &String) -> Result<(WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::handshake::client::Response), tokio_tungstenite::tungstenite::Error> {
-    let url = match url::Url::parse(&connect_addr) {
-        Ok(result) => { result }
-        Err(error) => {
-            error!("Invalid websocket url [{0}] Error[{1}]", connect_addr, error);
-            panic!("Invalid websocket url [{0}] Error[{1}]", connect_addr, error);
-        }
-    };
-    return connect_async(url).await;
-}
-
-async fn connect_to_db(connect_addr: &String) -> mongodb::error::Result<Client> {
-    let mut client_options = ClientOptions::parse(connect_addr).await?;
-    return Client::with_options(client_options);
-}
-
-async fn ping_db(client: &Client, database: &String) -> Result<Document, mongodb::error::Error> {
-    return client
-        .database(database)
-        .run_command(doc! {"ping": 1}, None).await;
-}
-
-async fn write_to_db(client: &Client, write_value: Bson, database: &String, collection: &str) -> Result<InsertOneResult, mongodb::error::Error> {
-    let database = client.database(database);
-    let collection = database.collection(collection);
-    return collection.insert_one(write_value, None).await;
 }
