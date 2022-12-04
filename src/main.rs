@@ -219,7 +219,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
 }
 
 
-async fn write_to_db(write_value: Bson, collection: &Collection<T>) -> Result<InsertOneResult, mongodb::error::Error> {
+async fn write_to_db(write_value: Bson, collection: &Collection<Bson>) -> Result<InsertOneResult, mongodb::error::Error> {
     return collection.insert_one(write_value, None).await;
 }
 
