@@ -42,6 +42,7 @@ use mongodb::{
     options::ClientOptions,
     results::InsertOneResult,
 };
+use mongodb::error::{Error, ErrorKind, WriteFailure};
 use models::{
     config,
 };
@@ -190,7 +191,22 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                     debug!("Database: Document inserted ID: [{0}]", inserted_id.inserted_id);
                 }
                 Err(error) => {
-                    error!("Database: Got error attempting to write to database message[{0}] [{1:?}]", ws_message, error);
+                    error!("Database: Got error attempting to write to database message [{0:?}] [{1}]", &error, ws_message);
+                    match *error.kind {
+                        ErrorKind::Write(details) => {
+                            match details {
+                                WriteFailure::WriteConcernError(_) => {}
+                                WriteFailure::WriteError(write_error) => {
+                                    if write_error.code == 11000 {
+                                        error!("Database: Got duplicate key error. Skipping...");
+                                        break;
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        _=>{}
+                    }
                     had_disconnect = true;
                     continue;//Dont skip the message. We should wait for db to reconnect
                 }
