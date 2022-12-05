@@ -282,7 +282,7 @@ fn config_logging(logging_config: &LoggingConfig) {
         .encoder(Box::new(JsonEncoder::new()))
         .build(&active_log,
                Box::new(CompoundPolicy::new(
-                   Box::new(SizeTrigger::new(10 * 1024 * 1024)),
+                   Box::new(SizeTrigger::new(500 * 1024 * 1024)),
                    Box::new(FixedWindowRoller::builder().build(&archive_patter, 10).unwrap()),
                )))
         .unwrap();
