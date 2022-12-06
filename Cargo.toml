@@ -17,3 +17,5 @@ serde = "1.0.147"
 log4rs = { version = "1.2.0", features = ["rolling_file_appender", "size_trigger", "compound_policy"] }
 log = "0.4.17"
 tungstenite = "0.18.0"
+prometheus = { version = "0.13.3", features = ["process", "push"] }
+config = "0.13.3"

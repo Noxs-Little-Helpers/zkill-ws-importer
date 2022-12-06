@@ -1,6 +1,6 @@
 mod models;
 
-use crate::models::config::LoggingConfig;
+use crate::models::app_config::LoggingConfig;
 
 extern crate core;
 
@@ -13,7 +13,13 @@ use tokio_tungstenite::{
     connect_async, MaybeTlsStream, WebSocketStream,
     tungstenite::Message::{Binary, Ping, Pong, Text},
 };
-use mongodb::{bson, bson::Document, Client, Collection, Database};
+use mongodb::{
+    bson,
+    bson::{Bson, doc, Document},
+    options::ClientOptions,
+    results::InsertOneResult,
+    Client, Collection, Database,
+};
 use serde_json::Value;
 use std::env;
 use std::fs;
@@ -37,19 +43,14 @@ use log4rs::{
     config::{Appender, Config, Root},
     filter::threshold::ThresholdFilter,
 };
-use mongodb::{
-    bson::{Bson, doc},
-    options::ClientOptions,
-    results::InsertOneResult,
-};
 use mongodb::error::{Error, ErrorKind, WriteFailure};
 use models::{
-    config,
+    app_config,
 };
 
 #[tokio::main]
 async fn main() {
-    let app_config: config::AppConfig = load_config();
+    let app_config: app_config::AppConfig = load_config();
     config_logging(&app_config.logging);
     info!("zkill-ws-importer started");
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -66,7 +67,7 @@ async fn main() {
 }
 
 // async fn read_from_ws_to_cache(cache_list: Arc<Mutex<Vec<&String>>>, app_config: Arc<AppConfig>) {
-async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: config::AppConfig) {
+async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: app_config::AppConfig) {
     info!("Web Socket: Starting connection");
     loop {
         let ws_stream = match start_websocket(&app_config.websocket.url).await {
@@ -137,7 +138,7 @@ async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: confi
     }
 }
 
-async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_config: config::AppConfig) {
+async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_config: app_config::AppConfig) {
     let client: Client = match connect_to_db(&app_config.database.conn_string).await {
         Ok(client) => {
             client
@@ -205,7 +206,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                                 _ => {}
                             }
                         }
-                        _=>{}
+                        _ => {}
                     }
                     had_disconnect = true;
                     continue;//Dont skip the message. We should wait for db to reconnect
@@ -233,7 +234,7 @@ async fn ping_db(database: &Database) -> Result<Document, mongodb::error::Error>
         .run_command(doc! {"ping": 1}, None).await;
 }
 
-fn load_config() -> config::AppConfig {
+fn load_config() -> app_config::AppConfig {
     let args: Vec<String> = env::args().collect();
     let config_loc = match args.get(1) {
         Some(loc) => {
@@ -243,12 +244,15 @@ fn load_config() -> config::AppConfig {
             panic!("Config file not specified in first argument");
         }
     };
-    let contents = fs::read_to_string(config_loc)
-        .expect(&format!("Cannot open config file {0}", config_loc));
 
-    let model: config::AppConfig = serde_json::from_str(&contents).unwrap();
-    // println!("{:?}", &model);
-    return model;
+    let imported_config = config::Config::builder()
+        .add_source(config::File::with_name(config_loc))
+        .add_source(config::Environment::with_prefix("NLH"))
+        .build()
+        .unwrap();
+    return imported_config
+        .try_deserialize::<app_config::AppConfig>()
+        .unwrap();
 }
 
 async fn start_websocket(connect_addr: &String) -> Result<(WebSocketStream<MaybeTlsStream<TcpStream>>, tokio_tungstenite::tungstenite::handshake::client::Response), tokio_tungstenite::tungstenite::Error> {
