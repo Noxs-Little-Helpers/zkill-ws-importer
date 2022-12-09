@@ -202,6 +202,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                 };
 
                 if is_in_collection(&killmail_id, &collection).await {
+                    info!("Database: Got kill from ws that is already in database. Skipping...");
                     continue;
                 }
             }
@@ -226,7 +227,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                                 WriteFailure::WriteConcernError(_) => {}
                                 WriteFailure::WriteError(write_error) => {
                                     if write_error.code == 11000 {
-                                        error!("Database: Got duplicate key error. Skipping...");
+                                        add !("Database: Got duplicate key error. Skipping...");
                                         break;
                                     }
                                 }
