@@ -202,7 +202,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                 };
 
                 if is_in_collection(&killmail_id, &collection).await {
-                    info!("Database: Got kill from ws that is already in database. Skipping...");
+                    info!("Database: Got kill from ws that is already in database [{}]. Skipping...", killmail_id);
                     continue;
                 }
             }
