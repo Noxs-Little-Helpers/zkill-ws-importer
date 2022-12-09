@@ -227,7 +227,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                                 WriteFailure::WriteConcernError(_) => {}
                                 WriteFailure::WriteError(write_error) => {
                                     if write_error.code == 11000 {
-                                        add !("Database: Got duplicate key error. Skipping...");
+                                        error!("Database: Got duplicate key error. Skipping...");
                                         break;
                                     }
                                 }
