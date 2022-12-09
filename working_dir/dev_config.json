@@ -6,8 +6,8 @@
   },
   "database": {
     "conn_string": "mongodb://localhost:27017",
-    "database_name": "noxslittlehelpers",
-    "collection_name": "zkillboard-imported-kills"
+    "database_name": "eve-stats-and-battle-reports",
+    "collection_name": "killmails"
   },
   "logging": {
     "dir": "./logs",
