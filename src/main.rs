@@ -20,9 +20,8 @@ use mongodb::{
     results::InsertOneResult,
     Client, Collection, Database,
 };
-use serde_json::Value;
+use serde_json::{Value};
 use std::env;
-use std::fs;
 use log::{error, info, warn, LevelFilter, debug};
 use log4rs::{
     append::{
@@ -43,7 +42,7 @@ use log4rs::{
     config::{Appender, Config, Root},
     filter::threshold::ThresholdFilter,
 };
-use mongodb::error::{Error, ErrorKind, WriteFailure};
+use mongodb::error::{ErrorKind, WriteFailure};
 use models::{
     app_config,
 };
@@ -178,6 +177,34 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                     break;//Skip the message it might not be valid json
                 }
             };
+            {
+                let killmail_id = match value.as_object() {
+                    None => {
+                        continue;
+                    }
+                    Some(value) => {
+                        match value.get("killmail_id") {
+                            None => {
+                                continue;
+                            }
+                            Some(killmail_value) => {
+                                match killmail_value.as_i64() {
+                                    None => {
+                                        continue;
+                                    }
+                                    Some(killmail_string) => {
+                                        killmail_string
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+
+                if is_in_collection(&killmail_id, &collection).await {
+                    continue;
+                }
+            }
             let bson_doc = match bson::to_bson(&value) {
                 Ok(value) => { value }
                 Err(error) => {
@@ -192,6 +219,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                     debug!("Database: Document inserted ID: [{0}]", inserted_id.inserted_id);
                 }
                 Err(error) => {
+                    let error_msg = format!("Database: Got error attempting to write to database message [{0:?}] [{1}]", &error, ws_message);
                     match *error.kind {
                         ErrorKind::Write(details) => {
                             match details {
@@ -207,7 +235,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                         }
                         _ => {}
                     }
-                    error!("Database: Got error attempting to write to database message [{0:?}] [{1}]", &error, ws_message);
+                    error!("{}", &error_msg);
                     had_disconnect = true;
                     continue;//Dont skip the message. We should wait for db to reconnect
                 }
@@ -218,6 +246,18 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
             };
         }
     }
+}
+
+async fn is_in_collection(id: &i64, collection: &mongodb::Collection<Bson>) -> bool {
+    return match collection.find_one(doc! {"killmail_id": id}, None).await {
+        Ok(result) => {
+            match result {
+                None => { false }
+                Some(_) => { true }
+            }
+        }
+        Err(_) => { false }
+    };
 }
 
 async fn write_to_db(write_value: Bson, collection: &Collection<Bson>) -> Result<InsertOneResult, mongodb::error::Error> {
