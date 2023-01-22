@@ -13,36 +13,19 @@ use tokio_tungstenite::{
     connect_async, MaybeTlsStream, WebSocketStream,
     tungstenite::Message::{Binary, Ping, Pong, Text},
 };
-use mongodb::{
-    bson,
-    bson::{Bson, doc, Document},
-    options::ClientOptions,
-    results::InsertOneResult,
-    Client, Collection, Database,
-};
 use serde_json::{Value};
 use std::env;
-use log::{error, info, warn, LevelFilter, debug};
+use log::{error, info, warn, LevelFilter, debug, trace};
 use log4rs::{
     append::{
         console::{
             ConsoleAppender,
             Target,
         },
-        rolling_file::{
-            policy::{
-                compound::CompoundPolicy,
-                compound::roll::fixed_window::FixedWindowRoller,
-                compound::trigger::size::SizeTrigger,
-            },
-            RollingFileAppender,
-        },
     },
-    encode::{json::JsonEncoder},
     config::{Appender, Config, Root},
     filter::threshold::ThresholdFilter,
 };
-use mongodb::error::{ErrorKind, WriteFailure};
 use models::{
     app_config,
 };
@@ -112,7 +95,7 @@ async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: app_c
                     }
                 }
                 Err(error) => {
-                    warn!("Web Socket: Error received on connection {0:?}", error);
+                    error!("Web Socket: Error received on connection {0:?}", error);
                     return;
                 }
             };
@@ -126,10 +109,8 @@ async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: app_c
                         panic!("Web Socket: Cannot send message on channel [{0}]", error);
                     }
                 };
-                info!("Web Socket: Wrote message to channel");
                 debug!("Web Socket: Wrote message to channel [{0}]",print_str);
             } else {
-                info!("Web Socket: Received empty message");
                 debug!("Web Socket: Received empty message. Will be ignored");
                 // tokio::io::stdout().write_all("Empty message\n".as_bytes()).await.unwrap();
             }
@@ -138,12 +119,11 @@ async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: app_c
 }
 
 async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_config: app_config::AppConfig) {
-    let client: Client = match connect_to_db(&app_config.database.conn_string).await {
+    let client: mongodb::Client = match connect_to_db(&app_config.database.conn_string).await {
         Ok(client) => {
             client
         }
         Err(error) => {
-            error!("Database: Unable to create database client [{0:?}]",error);
             panic!("Database: Unable to create database client. Dont know how to proceed so panicking [{0:?}]", error);
         }
     };
@@ -173,7 +153,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
             let value: Value = match serde_json::from_str(&ws_message) {
                 Ok(value) => { value }
                 Err(error) => {
-                    warn!("Database: Message could not be parsed by serde_json [{0}] [{1:?}]", ws_message, error);
+                    trace!("Database: Message could not be parsed by serde_json [{0}] [{1:?}]", ws_message, error);
                     break;//Skip the message it might not be valid json
                 }
             };
@@ -206,28 +186,28 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
                     continue;
                 }
             }
-            let bson_doc = match bson::to_bson(&value) {
+            let bson_doc = match mongodb::bson::to_bson(&value) {
                 Ok(value) => { value }
                 Err(error) => {
-                    warn!("Database: Json from serde_json could not be parsed by bson [{0}] [{1:?}]", ws_message, error);
+                    error!("Database: Json from serde_json could not be parsed by bson [{0}] [{1:?}]", ws_message, error);
                     break;//Skip the message it might not be valid json
                 }
             };
             match write_to_db(bson_doc, &collection).await {
                 Ok(inserted_id) => {
                     able_to_write_to_database = true;
-                    info!("Database: Document inserted");
-                    debug!("Database: Document inserted ID: [{0}]", inserted_id.inserted_id);
+                    debug!("Database: Document inserted");
+                    trace!("Database: Document inserted ID: [{0}]", inserted_id.inserted_id);
                 }
                 Err(error) => {
                     let error_msg = format!("Database: Got error attempting to write to database message [{0:?}] [{1}]", &error, ws_message);
                     match *error.kind {
-                        ErrorKind::Write(details) => {
+                        mongodb::error::ErrorKind::Write(details) => {
                             match details {
-                                WriteFailure::WriteConcernError(_) => {}
-                                WriteFailure::WriteError(write_error) => {
+                                mongodb::error::WriteFailure::WriteConcernError(_) => {}
+                                mongodb::error::WriteFailure::WriteError(write_error) => {
                                     if write_error.code == 11000 {
-                                        error!("Database: Got duplicate key error. Skipping...");
+                                        debug!("Database: Got duplicate key error. Skipping...");
                                         break;
                                     }
                                 }
@@ -249,8 +229,8 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
     }
 }
 
-async fn is_in_collection(id: &i64, collection: &mongodb::Collection<Bson>) -> bool {
-    return match collection.find_one(doc! {"killmail_id": id}, None).await {
+async fn is_in_collection(id: &i64, collection: &mongodb::Collection<mongodb::bson::Bson>) -> bool {
+    return match collection.find_one(mongodb::bson::doc! {"killmail_id": id}, None).await {
         Ok(result) => {
             match result {
                 None => { false }
@@ -261,18 +241,18 @@ async fn is_in_collection(id: &i64, collection: &mongodb::Collection<Bson>) -> b
     };
 }
 
-async fn write_to_db(write_value: Bson, collection: &Collection<Bson>) -> Result<InsertOneResult, mongodb::error::Error> {
+async fn write_to_db(write_value: mongodb::bson::Bson, collection: &mongodb::Collection<mongodb::bson::Bson>) -> Result<mongodb::results::InsertOneResult, mongodb::error::Error> {
     return collection.insert_one(write_value, None).await;
 }
 
-async fn connect_to_db(connect_addr: &String) -> mongodb::error::Result<Client> {
-    let client_options = ClientOptions::parse(connect_addr).await?;
-    return Client::with_options(client_options);
+async fn connect_to_db(connect_addr: &String) -> mongodb::error::Result<mongodb::Client> {
+    let client_options = mongodb::options::ClientOptions::parse(connect_addr).await?;
+    return mongodb::Client::with_options(client_options);
 }
 
-async fn ping_db(database: &Database) -> Result<Document, mongodb::error::Error> {
+async fn ping_db(database: &mongodb::Database) -> Result<mongodb::bson::Document, mongodb::error::Error> {
     return database
-        .run_command(doc! {"ping": 1}, None).await;
+        .run_command(mongodb::bson::doc! {"ping": 1}, None).await;
 }
 
 fn load_config() -> app_config::AppConfig {
@@ -300,7 +280,6 @@ async fn start_websocket(connect_addr: &String) -> Result<(WebSocketStream<Maybe
     let url = match url::Url::parse(&connect_addr) {
         Ok(result) => { result }
         Err(error) => {
-            error!("Invalid websocket url [{0}] Error[{1}]", connect_addr, error);
             panic!("Invalid websocket url [{0}] Error[{1}]", connect_addr, error);
         }
     };
@@ -308,43 +287,26 @@ async fn start_websocket(connect_addr: &String) -> Result<(WebSocketStream<Maybe
 }
 
 fn config_logging(logging_config: &LoggingConfig) {
-    let mut active_log = String::new();
-    {
-        active_log.push_str(&logging_config.dir);
-        active_log.push_str("/");
-        active_log.push_str(&logging_config.active_file);
-    }
-    let mut archive_patter = String::new();
-    {
-        archive_patter.push_str(&logging_config.dir);
-        archive_patter.push_str("/");
-        archive_patter.push_str(&logging_config.archive_pattern);
-    }
     let log_to_stdout = ConsoleAppender::builder().target(Target::Stdout)
         .build();
-    // Build a file logger.
-    let log_to_file = RollingFileAppender::builder()
-        .encoder(Box::new(JsonEncoder::new()))
-        .build(&active_log,
-               Box::new(CompoundPolicy::new(
-                   Box::new(SizeTrigger::new(500 * 1024 * 1024)),
-                   Box::new(FixedWindowRoller::builder().build(&archive_patter, 10).unwrap()),
-               )))
-        .unwrap();
+    let log_to_stderr = ConsoleAppender::builder().target(Target::Stderr)
+        .build();
 
-    // Log Debug level output to file where debug is the default level
-    // and the programmatically specified level to stderr.
     let config = Config::builder()
-        .appender(Appender::builder().build("log_to_file", Box::new(log_to_file)))
         .appender(
             Appender::builder()
                 .filter(Box::new(ThresholdFilter::new(log::LevelFilter::Info)))
                 .build("log_to_stdout", Box::new(log_to_stdout)),
         )
+        .appender(
+            Appender::builder()
+                .filter(Box::new(ThresholdFilter::new(log::LevelFilter::Error)))
+                .build("log_to_stderr", Box::new(log_to_stderr)),
+        )
         .build(
             Root::builder()
-                .appender("log_to_file")
                 .appender("log_to_stdout")
+                .appender("log_to_stderr")
                 .build(LevelFilter::Debug),
         )
         .unwrap();
