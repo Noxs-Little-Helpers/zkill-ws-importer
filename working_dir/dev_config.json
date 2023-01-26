@@ -7,11 +7,9 @@
   "database": {
     "conn_string": "mongodb://localhost:27017",
     "database_name": "eve-stats-and-battle-reports",
-    "collection_name": "killmails"
+    "killmail_collection": "killmails"
   },
   "logging": {
-    "dir": "./logs",
-    "active_file": "zkill-ws-importer.log",
-    "archive_pattern": "zkill-ws-importer_{}.log"
+    "logging_level": "DEBUG"
   }
 }

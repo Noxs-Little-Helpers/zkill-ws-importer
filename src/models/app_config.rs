@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub struct AppConfig {
     pub websocket: WebsocketConfig,
     pub database: DatabaseConfig,
-    pub logging: LoggingConfig,
+    pub logging: Option<LoggingConfig>,
 }
 
 #[derive(Debug)]
@@ -24,14 +24,12 @@ pub struct WebsocketConfig {
 pub struct DatabaseConfig {
     pub conn_string: String,
     pub database_name: String,
-    pub collection_name: String,
+    pub killmail_collection: String,
 }
 
 #[derive(Debug)]
 #[derive(Serialize, Deserialize)]
 #[derive(Clone)]
 pub struct LoggingConfig {
-    pub dir: String,
-    pub active_file: String,
-    pub archive_pattern: String,
+    pub logging_level: String,
 }

@@ -14,8 +14,8 @@ url = "2.3.1"
 mongodb = "2.3.1"
 serde_json = "1.0.89"
 serde = "1.0.147"
-log4rs = { version = "1.2.0", features = ["rolling_file_appender", "size_trigger", "compound_policy"] }
-log = "0.4.17"
 tungstenite = "0.18.0"
 prometheus = { version = "0.13.3", features = ["process", "push"] }
 config = "0.13.3"
+tracing = "0.1.37"
+tracing-subscriber = "0.3.16"

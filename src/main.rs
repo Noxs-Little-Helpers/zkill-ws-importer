@@ -1,7 +1,5 @@
 mod models;
 
-use crate::models::app_config::LoggingConfig;
-
 extern crate core;
 
 use futures_util::{SinkExt, StreamExt};
@@ -15,17 +13,9 @@ use tokio_tungstenite::{
 };
 use serde_json::{Value};
 use std::env;
-use log::{error, info, warn, LevelFilter, debug, trace};
-use log4rs::{
-    append::{
-        console::{
-            ConsoleAppender,
-            Target,
-        },
-    },
-    config::{Appender, Config, Root},
-    filter::threshold::ThresholdFilter,
-};
+use std::str::FromStr;
+use tracing::{error, info, warn, debug, trace, Level};
+use tracing_subscriber::FmtSubscriber;
 use models::{
     app_config,
 };
@@ -33,7 +23,17 @@ use models::{
 #[tokio::main]
 async fn main() {
     let app_config: app_config::AppConfig = load_config();
-    config_logging(&app_config.logging);
+    config_logging(match &app_config.logging {
+        None => { Level::INFO }
+        Some(logging_config) => {
+            match Level::from_str(&logging_config.logging_level.as_str()) {
+                Err(e) => {
+                    panic!("Invalid logging level supplied in config. Supplied value [{0}] Error [{1:?}]", &logging_config.logging_level, e);
+                }
+                Ok(level) => { level }
+            }
+        }
+    });
     info!("zkill-ws-importer started");
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
     // let app_config_arc = Arc::new(app_config);
@@ -49,6 +49,7 @@ async fn main() {
 }
 
 // async fn read_from_ws_to_cache(cache_list: Arc<Mutex<Vec<&String>>>, app_config: Arc<AppConfig>) {
+#[tracing::instrument]
 async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: app_config::AppConfig) {
     info!("Web Socket: Starting connection");
     loop {
@@ -118,6 +119,7 @@ async fn read_from_ws(sender_channel: UnboundedSender<String>, app_config: app_c
     }
 }
 
+#[tracing::instrument]
 async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_config: app_config::AppConfig) {
     let client: mongodb::Client = match connect_to_db(&app_config.database.conn_string).await {
         Ok(client) => {
@@ -128,7 +130,7 @@ async fn write_to_database(mut receiver_channel: UnboundedReceiver<String>, app_
         }
     };
     let database = client.database(&app_config.database.database_name);
-    let collection = database.collection(&app_config.database.collection_name);
+    let collection = database.collection(&app_config.database.killmail_collection);
     {
         info!("Database: Attempting to connect");
         let mut test_ping_successful = false;
@@ -286,30 +288,10 @@ async fn start_websocket(connect_addr: &String) -> Result<(WebSocketStream<Maybe
     return connect_async(url).await;
 }
 
-fn config_logging(logging_config: &LoggingConfig) {
-    let log_to_stdout = ConsoleAppender::builder().target(Target::Stdout)
-        .build();
-    let log_to_stderr = ConsoleAppender::builder().target(Target::Stderr)
-        .build();
-
-    let config = Config::builder()
-        .appender(
-            Appender::builder()
-                .filter(Box::new(ThresholdFilter::new(log::LevelFilter::Info)))
-                .build("log_to_stdout", Box::new(log_to_stdout)),
-        )
-        .appender(
-            Appender::builder()
-                .filter(Box::new(ThresholdFilter::new(log::LevelFilter::Error)))
-                .build("log_to_stderr", Box::new(log_to_stderr)),
-        )
-        .build(
-            Root::builder()
-                .appender("log_to_stdout")
-                .appender("log_to_stderr")
-                .build(LevelFilter::Debug),
-        )
-        .unwrap();
-
-    log4rs::init_config(config).unwrap();
+fn config_logging(logging_level: Level) {
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(logging_level)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Setting default logging subscriber failed");
 }
