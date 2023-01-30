@@ -15,6 +15,6 @@
     "archive_pattern": "zkill-ws-importer_{}.log"
   },
   "logging": {
-    "logging_level": "DEBUG"
+    "logging_level": "INFO"
   }
 }
